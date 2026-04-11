@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Force dark mode always */
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #0a0b0d;
+  color: #e8eaed;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2d35 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a2d35;
+  border-radius: 2px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3d4250;
+}
+
+/* Canvas rendering hint */
+canvas {
+  image-rendering: crisp-edges;
+}
+
+/* Select option colors in dark mode */
+option {
+  background-color: #1c1f24;
+  color: #e8eaed;
+}
+
+/* Framer Motion: avoid layout shift */
+.framer-motion-reduce * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Prevent text selection on charts */
+.select-none {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Tabular number alignment */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
