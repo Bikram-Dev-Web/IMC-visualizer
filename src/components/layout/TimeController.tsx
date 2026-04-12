@@ -7,7 +7,7 @@ import { useVisualizerStore, selectViewport } from "@/lib/store/useVisualizerSto
 
 function formatTs(ts: number): string {
   if (ts > 1_000_000_000) return new Date(ts).toLocaleTimeString("en-US", { hour12: false });
-  return `T${Math.round(ts).toLocaleString()}`;
+  return `T${Math.round(ts).toLocaleString("en-US")}`;
 }
 
 export function TimeController() {
@@ -73,7 +73,7 @@ export function TimeController() {
       <div className="flex flex-col text-[10px] font-mono text-text-muted w-20 text-right">
         <span>{formatTs(viewport.xMax)}</span>
         <span className="text-strat-a">
-          Δ {Math.round(viewport.xMax - viewport.xMin).toLocaleString()}
+          Δ {Math.round(viewport.xMax - viewport.xMin).toLocaleString("en-US")}
         </span>
       </div>
 

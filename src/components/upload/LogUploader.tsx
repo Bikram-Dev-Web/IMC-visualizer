@@ -1,17 +1,16 @@
 "use client";
 /**
  * LogUploader — drag-and-drop + click-to-browse file uploader.
- * Launches the Web Worker for parsing and updates store state.
+ * Parses the log on the main thread via dynamic import.
  */
 
 import React, { useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileText, CheckCircle, AlertCircle, X } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useVisualizerStore } from "@/lib/store/useVisualizerStore";
-import type { WorkerResponse } from "@/types";
 
 interface UploaderProps {
   strategyId: "A" | "B";
@@ -19,7 +18,6 @@ interface UploaderProps {
 
 export function LogUploader({ strategyId }: UploaderProps) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const workerRef = useRef<Worker | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const loadState = useVisualizerStore((s) =>
@@ -44,65 +42,38 @@ export function LogUploader({ strategyId }: UploaderProps) {
 
   const processFile = useCallback(
     (file: File) => {
-      if (workerRef.current) workerRef.current.terminate();
-
       setLoadState("loading");
       setProgress(0);
 
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const text = e.target?.result as string;
-
-        // Spawn Web Worker for parsing
-        const worker = new Worker(
-          new URL("@/lib/workers/parserWorker.ts", import.meta.url),
-          { type: "module" }
-        );
-        workerRef.current = worker;
-
-        worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
-          const { type, payload } = ev.data;
-          if (type === "PROGRESS") {
-            setProgress((payload as { progress: number }).progress);
-          } else if (type === "DONE") {
-            setLog(payload as any);
-            worker.terminate();
-          } else if (type === "ERROR") {
-            setLoadState("error");
-            console.error("Parse error:", (payload as { message: string }).message);
-            worker.terminate();
-          }
-        };
-
-        worker.onerror = (err) => {
-          console.error("Worker error:", err);
+        // Yield to React so the loading spinner renders before we block the thread
+        await new Promise<void>((r) => setTimeout(r, 0));
+        try {
+          const { parseLog } = await import("@/lib/parser/logParser");
+          const result = parseLog(text, strategyId, file.name, (p) => {
+            setProgress(p);
+          });
+          setLog(result);
+        } catch (err) {
+          console.error("Parse error:", err);
           setLoadState("error");
-          // Fallback: parse on main thread
-          try {
-            const { parseLog } = require("@/lib/parser/logParser");
-            const result = parseLog(text, strategyId, file.name, setProgress);
-            setLog(result);
-          } catch (e2) {
-            console.error("Main thread parse also failed:", e2);
-          }
-        };
-
-        worker.postMessage({
-          type: "PARSE",
-          payload: { text, strategyId, fileName: file.name },
-        });
+        }
       };
-
       reader.onerror = () => setLoadState("error");
       reader.readAsText(file);
     },
     [strategyId, setLoadState, setProgress, setLog]
   );
 
-  const handleFileSelect = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    processFile(files[0]);
-  };
+  const handleFileSelect = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      processFile(files[0]);
+    },
+    [processFile]
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -113,10 +84,8 @@ export function LogUploader({ strategyId }: UploaderProps) {
     [handleFileSelect]
   );
 
-  const colorA = "strat-a";
-  const colorB = "strat-b";
-  const color = strategyId === "A" ? colorA : colorB;
   const hexColor = strategyId === "A" ? "#00d4aa" : "#7c6af7";
+  const color = strategyId === "A" ? "strat-a" : "strat-b";
 
   const borderClass =
     dragging
@@ -140,18 +109,16 @@ export function LogUploader({ strategyId }: UploaderProps) {
       <input
         ref={fileRef}
         type="file"
-        accept=".log,.txt,.csv"
+        accept=".log,.txt,.csv,.json"
         className="hidden"
         onChange={(e) => handleFileSelect(e.target.files)}
       />
 
       <div className="px-4 py-5 flex flex-col items-center gap-3">
-        {/* Badge */}
         <Badge variant={strategyId === "A" ? "stratA" : "stratB"} className="mb-1">
           Strategy {strategyId}
         </Badge>
 
-        {/* Icon / state */}
         <AnimatePresence mode="wait">
           {loadState === "idle" && (
             <motion.div key="idle" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
@@ -178,7 +145,6 @@ export function LogUploader({ strategyId }: UploaderProps) {
           )}
         </AnimatePresence>
 
-        {/* Text */}
         <div className="text-center">
           {loadState === "idle" && (
             <>
@@ -200,7 +166,7 @@ export function LogUploader({ strategyId }: UploaderProps) {
                 {logFile.fileName}
               </p>
               <p className="text-[10px] text-text-muted font-mono mt-0.5">
-                {logFile.rowCount.toLocaleString()} rows · {logFile.products.length} products
+                {logFile.rowCount.toLocaleString("en-US")} rows · {logFile.products.length} products
                 · {logFile.parseTime}ms
               </p>
             </>
@@ -210,7 +176,6 @@ export function LogUploader({ strategyId }: UploaderProps) {
           )}
         </div>
 
-        {/* Progress bar */}
         {loadState === "loading" && (
           <Progress
             value={progress}
@@ -219,7 +184,6 @@ export function LogUploader({ strategyId }: UploaderProps) {
           />
         )}
 
-        {/* Re-upload button when ready */}
         {(loadState === "ready" || loadState === "error") && (
           <Button
             size="sm"
