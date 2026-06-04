@@ -55,6 +55,11 @@ export function LogUploader({ strategyId }: UploaderProps) {
           const result = parseLog(text, strategyId, file.name, (p) => {
             setProgress(p);
           });
+          if (result.products.length === 0 || result.rowCount === 0) {
+            console.error("Parse produced no usable data:", file.name);
+            setLoadState("error");
+            return;
+          }
           setLog(result);
         } catch (err) {
           console.error("Parse error:", err);

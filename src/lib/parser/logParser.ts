@@ -68,6 +68,19 @@ interface RawTrade {
   quantity: number;
 }
 
+interface JsonLogEntry {
+  timestamp?: number;
+  sandboxLog?: string;
+  lambdaLog?: string;
+}
+
+interface JsonLogExport {
+  activitiesLog?: string;
+  tradeHistory?: unknown;
+  sandboxLogs?: unknown;
+  logs?: unknown;
+}
+
 // ─── Section detector ─────────────────────────────────────────────────────────
 
 function detectSections(text: string): {
@@ -102,6 +115,68 @@ function parseSandboxSection(text: string): SandboxLog[] {
     }
   }
   return logs;
+}
+
+function inferSandboxProduct(message: string): string {
+  const trimmed = message.trim();
+  const prefixed = trimmed.match(/^\[?\d+\s*,\s*"[^"]*"\s*,\s*"([A-Z_]+)\b/);
+  if (prefixed) return prefixed[1];
+
+  const token = trimmed.match(/\b([A-Z][A-Z0-9_]{2,})\b/);
+  return token?.[1] ?? "SYSTEM";
+}
+
+function parseJsonSandboxLogs(value: unknown): SandboxLog[] {
+  if (!Array.isArray(value)) return [];
+
+  const logs: SandboxLog[] = [];
+  for (const entry of value as JsonLogEntry[]) {
+    const timestamp =
+      typeof entry?.timestamp === "number" ? entry.timestamp : 0;
+
+    for (const rawMessage of [entry?.sandboxLog, entry?.lambdaLog]) {
+      if (typeof rawMessage !== "string" || !rawMessage.trim()) continue;
+
+      const message = rawMessage.trim();
+      const lower = message.toLowerCase();
+      const level =
+        lower.includes("error") ? "ERROR" :
+        lower.includes("warn") ? "WARN" : "INFO";
+
+      logs.push({
+        timestamp,
+        product: inferSandboxProduct(message),
+        message,
+        level,
+      });
+    }
+  }
+
+  return logs;
+}
+
+function normalizeJsonTradeHistory(value: unknown): string {
+  if (Array.isArray(value)) return JSON.stringify(value);
+  if (typeof value === "string") return value;
+  return "[]";
+}
+
+function tryParseJsonExport(text: string): JsonLogExport | null {
+  try {
+    const parsed = JSON.parse(text) as JsonLogExport;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (
+      typeof parsed.activitiesLog === "string" ||
+      parsed.tradeHistory !== undefined ||
+      parsed.sandboxLogs !== undefined ||
+      parsed.logs !== undefined
+    ) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Activities log parser ────────────────────────────────────────────────────
@@ -314,38 +389,56 @@ export function parseLog(
   onProgress?: (p: number) => void
 ): ParsedLog {
   const start = Date.now();
-  const { sandboxStart, activitiesStart, tradeHistStart } = detectSections(text);
+  const jsonExport = tryParseJsonExport(text);
 
-  // Extract section text
-  const sandboxText = sandboxStart >= 0
-    ? text.slice(
-        sandboxStart + "sandbox logs:".length,
-        activitiesStart > sandboxStart ? activitiesStart : undefined
-      )
-    : "";
+  let sandboxLogs: SandboxLog[] = [];
+  let rawByProduct = new Map<string, RawActivityRow[]>();
+  let rawTrades: RawTrade[] = [];
 
-  const activitiesText = activitiesStart >= 0
-    ? text.slice(
-        activitiesStart + "activities log:".length,
-        tradeHistStart > activitiesStart ? tradeHistStart : undefined
-      )
-    : "";
+  if (jsonExport) {
+    onProgress?.(0.05);
+    sandboxLogs = parseJsonSandboxLogs(jsonExport.sandboxLogs ?? jsonExport.logs);
 
-  const tradeText = tradeHistStart >= 0
-    ? text.slice(tradeHistStart + "trade history:".length)
-    : "";
+    onProgress?.(0.1);
+    rawByProduct = parseActivitiesSection(jsonExport.activitiesLog ?? "", (p) =>
+      onProgress?.(0.1 + p * 0.6)
+    );
 
-  // Parse sections
-  onProgress?.(0.05);
-  const sandboxLogs = parseSandboxSection(sandboxText);
+    onProgress?.(0.7);
+    rawTrades = parseTradeHistory(normalizeJsonTradeHistory(jsonExport.tradeHistory));
+  } else {
+    const { sandboxStart, activitiesStart, tradeHistStart } = detectSections(text);
 
-  onProgress?.(0.1);
-  const rawByProduct = parseActivitiesSection(activitiesText, (p) =>
-    onProgress?.(0.1 + p * 0.6)
-  );
+    // Extract section text
+    const sandboxText = sandboxStart >= 0
+      ? text.slice(
+          sandboxStart + "sandbox logs:".length,
+          activitiesStart > sandboxStart ? activitiesStart : undefined
+        )
+      : "";
 
-  onProgress?.(0.7);
-  const rawTrades = parseTradeHistory(tradeText);
+    const activitiesText = activitiesStart >= 0
+      ? text.slice(
+          activitiesStart + "activities log:".length,
+          tradeHistStart > activitiesStart ? tradeHistStart : undefined
+        )
+      : "";
+
+    const tradeText = tradeHistStart >= 0
+      ? text.slice(tradeHistStart + "trade history:".length)
+      : "";
+
+    onProgress?.(0.05);
+    sandboxLogs = parseSandboxSection(sandboxText);
+
+    onProgress?.(0.1);
+    rawByProduct = parseActivitiesSection(activitiesText, (p) =>
+      onProgress?.(0.1 + p * 0.6)
+    );
+
+    onProgress?.(0.7);
+    rawTrades = parseTradeHistory(tradeText);
+  }
 
   onProgress?.(0.8);
 
