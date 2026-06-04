@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     // Enable server actions for AI endpoint
-    serverActions: { allowedOrigins: ["localhost:3000"] },
+    serverActions: { allowedOrigins: ["localhost:3000", "localhost:3001", "localhost:3002"] },
   },
 };
 
